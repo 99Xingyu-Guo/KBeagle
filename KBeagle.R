@@ -2,13 +2,96 @@
 
 #KBeagle_function
 #We need to keep Tassel-related files, files to impute, etc. all in one folder.The tassel folder contains sTASSEL.jar, run_pipeline.pl, and lib.
-#The first column in the imputed file is the individual ID name, and the remaining columns are the SNP.
-Impute.subgroup <- function(XYcluster){
+#The first column in the imputed file is the individual ID and named ID, and the remaining columns are the SNP.
+KBeagle <- function(data_NA){
+	 print("The packages about KBeagle are installing.")
+	 if (!requireNamespace("data.table", quietly = TRUE)) {install.packages("data.table")}
+	 if (!requireNamespace("cluster", quietly = TRUE)) {install.packages("cluster")}
+	 if (!requireNamespace("ggplot2", quietly = TRUE)) {install.packages("ggplot2")}
+	 if (!requireNamespace("parallel", quietly = TRUE)) {install.packages("parallel")}
+	 if (!requireNamespace("foreach", quietly = TRUE)) {install.packages("foreach")}
+	 if (!requireNamespace("doParallel", quietly = TRUE)) {install.packages("doParallel")}
+	
+	 library(data.table)
+     library(cluster)
+     library(ggplot2)
+     library(parallel)
+	 library(foreach)
+     library(doParallel)
+	 set.seed(1)
+	 if(!file.exists("beagle.22Jul22.46e.jar")){
+         system("wget -O beagle.22Jul22.46e.jar https://github.com/99Xingyu-Guo/KBeagle/blob/main/beagle.22Jul22.46e.jar")
+    }
+	 if(!file.exists("vcf2hpm2_wy_v1.pl")){
+         system("wget -O vcf2hpm2_wy_v1.pl https://github.com/99Xingyu-Guo/KBeagle/blob/main/vcf2hpm2_wy_v1.pl")
+    }
+     
+	 print("The data_NA is converting to cluster file format.")
+	 data1 <- data_NA
+	 data1[data1==0] <- "0"
+	 data1[data1==1] <- "1"
+	 data1[data1==2] <- "2"
+	 data1[is.na(data1)] <- "1"
+	 data <- data1[-1]
+	 write.table(data, "data_KMeans", quote = FALSE, sep = "\t", col.name = TRUE, row.name = FALSE)
+     data <- read.table("data_KMeans", sep = "\t", header = TRUE)
+	 print("The data_NA has been converted to cluster file.")
+
+     print("The number of clusters(KN) is calculating.")
+	 sil_width <- numeric(10)
+     for(kn in 2:10){
+      km <- kmeans(data,centers=kn,nstart=25)
+      ss <- silhouette(km$cluster,dist(data))
+      sil_width[kn] <- mean(ss[,3])
+    }
+     KN <- which.max(sil_width) 
+ 
+	 b1 <- as.data.frame(data1[1])
+	 cluster_data <- data.frame(ID = b1, data)
+     data.kmeans <- kmeans(data, KN)
+     t <- table(cluster_data$ID, data.kmeans$cluster)
+     colnames(t) <- paste("type", 1:KN, sep = "")
+     t1 <- cbind(data.frame(b1), apply(t, 2, as.numeric))
+     colnames(t1)[1] <- "ID"
+	
+	 print("The cluster sub files are Generating.")
+     #生成聚类的文件
+	 for(i in 1:KN){
+         d <- t1[grep("1", t1[, i+1]), ]
+         type <- merge(d, data1, all = FALSE, by = "ID")
+         type_result <- type[, -c(2:(KN+1))]
+         X <- type_result[, -1]
+         fwrite(X, file <- paste("cluster_", i, ".txt", sep = ""), quote = FALSE, sep = "\t", col.name = TRUE, row.name = FALSE)
+    }
+	 
+	 print("The related imputation files are transferring.")
+	 for(n in 1:KN){
+	     dir_name <- paste0("mid_", n)
+		 if(!file.exists(dir_name)){
+             dir.create(dir_name)
+        }
+		 raw_cluster_path = paste(getwd(), "/cluster_", n, ".txt", sep = "")
+		 now_cluster_path = paste0(getwd(), "/mid_", n)
+		 file.copy(from = raw_cluster_path, to = now_cluster_path)
+		 raw_tassel_1 = paste0(getwd(), "/tasseladmin-tassel-5/sTASSEL.jar")
+		 file.copy(from = raw_tassel_1, to = now_cluster_path)
+		 raw_tassel_2 = paste0(getwd(), "/tasseladmin-tassel-5/run_pipeline.pl")
+		 file.copy(from = raw_tassel_2, to = now_cluster_path)
+		 raw_tassel_3 = paste0(getwd(), "/tasseladmin-tassel-5/lib")
+		 file.copy(from = raw_tassel_3, to = now_cluster_path, recursive = TRUE)
+		 raw_perl = paste0(getwd(), "/vcf2hpm2_wy_v1.pl")
+		 file.copy(from = raw_perl, to = now_cluster_path)
+		 raw_beagle = paste0(getwd(), "/beagle.22Jul22.46e.jar")
+		 file.copy(from = raw_beagle, to = now_cluster_path)
+	}
+     
+	 print("The cluster sub files are entering multi-threaded imputation.")
+	 Impute.subgroup <- function(XYcluster){
      if(!file.exists("beagle.22Jul22.46e.jar")){
       system("wget -O beagle.22Jul22.46e.jar https://github.com/99Xingyu-Guo/KBeagle/blob/main/beagle.22Jul22.46e.jar")
     }
      print("subgroup will read file...")
-     X <- read.table(XYcluster, header <- TRUE, na.strings <- "NA", sep <- "\t")
+     X <- read.table(XYcluster, header = TRUE, na.strings = "NA", sep = "\t")
      print("subgroup has done in reading file.")
      X[X==0] <- "AA"
      X[X==1] <- "AG"
@@ -25,7 +108,7 @@ Impute.subgroup <- function(XYcluster){
      out.hmp <- cbind(rs, alleles, chrom, pos, hmp5.11, hmp)
      colnames(out.hmp)[5:11] <- c("strand", "assembly", "center", "protLSID", "assayLSID", "panelLSID", "QCcode")
      colnames(out.hmp)[12:ncol(out.hmp)] <- paste0("V", 1:(ncol(out.hmp)-11))
-     write.table(out.hmp, "mid1.hmp", col.names <- T, sep <- "\t", row.names <- F, quote <- F)#输出填充前hmp格式文件
+     write.table(out.hmp, "mid1.hmp", col.names = T, sep = "\t", row.names = F, quote = F)#输出填充前hmp格式文件
      rm(hmp, out.hmp, X)
 	 print("subgroup has converted from num format to hapmap format.")
 	 tassel_script <- file.path(getwd(), "run_pipeline.pl")
@@ -33,18 +116,18 @@ Impute.subgroup <- function(XYcluster){
          tassel_script, 
          "-Xms512m -Xmx2g", 
          "-fork1 -h", 
-         hapmap_file <- "mid1.hmp", 
+         hapmap_file = "mid1.hmp", 
          "-export -exportType VCF -runfork1", 
-         sep <- " "))
+         sep = " "))
      print("subgroup has converted from hapmap format to VCF format.")
-     system("java -Xmx50g -jar beagle.22Jul22.46e.jar gt <- mid1.vcf out <- mid3")
+     system("java -Xmx50g -jar beagle.22Jul22.46e.jar gt=mid1.vcf out=mid3")
 	 print("The file has been completed imputation.")
 	 tryCatch({
-         lj <- gzfile("mid3.vcf.gz", "rt")
-    }, error <- function(e) {
+         lj = gzfile("mid3.vcf.gz", "rt")
+    }, error = function(e) {
          print("Error occurred while opening the file.")
-         system("java -Xmx10g -jar beagle.22Jul22.46e.jar gt <- mid1.vcf out <- mid3")
-         lj <- gzfile("mid3.vcf.gz", "rt")
+         system("java -Xmx10g -jar beagle.22Jul22.46e.jar gt=mid1.vcf out=mid3")
+         lj = gzfile("mid3.vcf.gz", "rt")
     })
      content <- readLines(lj)  
      close(lj)
@@ -56,10 +139,10 @@ Impute.subgroup <- function(XYcluster){
          "vcf2hpm2_wy_v1.pl", 
          shQuote(vcf_path), 
          shQuote(snp_path), 
-         sep <- " ")		 
+         sep = " ")		 
      system(command)
 	 print("subgroup has converted from VCF format to hapmap format.")
-     X4 <- data.table::fread("mid2.txt", sep <- " ")
+     X4 <- data.table::fread("mid2.txt", sep = " ")
      X5 <- as.matrix(X4[, -c(1:11)])
      X6 <- t(X5)
      index.AA <- X6=="AA"
@@ -73,91 +156,14 @@ Impute.subgroup <- function(XYcluster){
      genotype.n[index.GG] <- 2
 	 XYcluster <- gsub(".txt", ".kbeagle", XYcluster)
 	 print(dim(genotype.n))
-     write.table(genotype.n, file <- XYcluster, quote <- F, sep <- "\t", col.names <- F, row.names <- F)
+     write.table(genotype.n, file = XYcluster, quote = F, sep = "\t", col.names = F, row.names = F)
      print("subgroup has finished.")
 }
-KBeagle <- function(data_NA){
-	 print("The packages about KBeagle are installing.")
-	 library(data.table)
-     library(factoextra)
-     library(cluster)
-     library(ggplot2)
-     library(parallel)
-	 library(foreach)
-     library(doParallel)
-	 set.seed(1)
-	 if(!file.exists("beagle.22Jul22.46e.jar")){
-         system("wget -O beagle.22Jul22.46e.jar https://github.com/99Xingyu-Guo/KBeagle/blob/main/beagle.22Jul22.46e.jar")
-    }
-	 if(!file.exists("vcf2hpm2_wy_v1.pl")){
-         system("wget -O vcf2hpm2_wy_v1.pl https://github.com/99Xingyu-Guo/KBeagle/blob/main/vcf2hpm2_wy_v1.pl")
-    }
-     
-	 print("The data_NA is converting to cluster file format.")
-	 data1 <- read.table(data_NA, header = TRUE, sep = "\t")#读取缺失文件
-	 data1[data1==0] <- "0"
-	 data1[data1==1] <- "1"
-	 data1[data1==2] <- "2"
-	 data1[is.na(data1)] <- "1"
-	 data <- data1[-1]
-	 write.table(data, "data_KMeans", quote = FALSE, sep = "\t", col.name = TRUE, row.name = FALSE)
-     data <- read.table("data_KMeans", sep = "\t", header = TRUE)
-	 print("The data_NA has been converted to cluster file.")
-
-     print("The number of clusters(KN) is determining.")
-	 sil_width <- numeric(10)
-     for(kn in 2:10){
-      km <- kmeans(data,centers=kn,nstart=25)
-      ss <- silhouette(km$cluster,dist(data))
-      sil_width[kn] <- mean(ss[,3])
-    }
-     KN <- which.max(sil_width) 
- 
-	 b1 <- as.data.frame(data1[1])
-	 cluster_data <- data.frame(IID = b1, data)
-     data.kmeans <- kmeans(data, KN)
-     t <- table(cluster_data$IID, data.kmeans$cluster)#展示为列表型，其中第一列为个体ID，之后的列表示个体是否属于该聚类，表示为0、1矩阵
-     colnames(t) <- paste("type", 1:KN, sep = "")#将列名表示为“type 1”、“type 2”……“type KN”
-     t1 <- cbind(data.frame(b1), apply(t, 2, as.numeric))#将ID列加入到聚类的t文件中，转换文件格式
-     colnames(t1)[1] <- "IID"
-	
-	 print("The cluster sub files are Generating.")
-     #生成聚类的文件
-	 for(i in 1:KN){
-         d <- t1[grep("1", t1[, i+1]), ]
-         type <- merge(d, data1, all = FALSE, by = "IID")
-         type_result <- type[, -c(2:(KN+1))]
-         X <- type_result[, -1]
-         fwrite(X, file <- paste("cluster_", i, ".txt", sep = ""), quote = FALSE, sep = "\t", col.name = TRUE, row.name = FALSE)
-    }
-	 
-	 print("The related imputation files are transferring.")
-	 for(n in 1:KN){
-	     dir_name <- paste0("mid_", n)
-		 if(!file.exists(dir_name)){
-             dir.create(dir_name)
-        }
-		 raw_cluster_path = paste(getwd(), "/cluster_", n, ".txt", sep = "")
-		 now_cluster_path = paste0(getwd(), "/mid_", n)
-		 file.copy(from = raw_cluster_path, to = now_cluster_path)
-		 raw_tassel_1 = paste0(getwd(), "/sTASSEL.jar")
-		 file.copy(from = raw_tassel_1, to = now_cluster_path)
-		 raw_tassel_2 = paste0(getwd(), "/run_pipeline.pl")
-		 file.copy(from = raw_tassel_2, to = now_cluster_path)
-		 raw_tassel_3 = paste0(getwd(), "/lib")
-		 file.copy(from = raw_tassel_3, to = now_cluster_path, recursive = TRUE)
-		 raw_perl = paste0(getwd(), "/vcf2hpm2_wy_v1.pl")
-		 file.copy(from = raw_perl, to = now_cluster_path)
-		 raw_beagle = paste0(getwd(), "/beagle.22Jul22.46e.jar")
-		 file.copy(from = raw_beagle, to = now_cluster_path)
-	}
-     
-	 print("The cluster sub files are entering multi-threaded imputation.")
      num_cores <- detectCores()
-     cl <- makeCluster(num_cores)
+     cl <- makeCluster(num_cores-2)
 	 registerDoParallel(cl)
      raw_path <- getwd()
-     XYparallel <- foreach(j <- 1:KN) %dopar% {
+     XYparallel <- foreach(j = 1:KN) %dopar% {
        parallel_path <- paste0(raw_path, "/mid_", j)
        dir.create(parallel_path, showWarnings = FALSE)
        setwd(parallel_path)
@@ -184,7 +190,7 @@ KBeagle <- function(data_NA){
     }
 	 colnames(X.bgl2) <- as.character(colnames(data1))
      X2 <- data.frame(X.bgl2)
-	 loc <- match(b1$IID, X2$IID)
+	 loc <- match(b1$ID, X2$ID)
 	 W <- X2[loc, ]
 	 finished_file_path <- paste0(raw_path, "/KBeagle_wc")
      dir.create(finished_file_path, showWarnings = FALSE)
@@ -199,7 +205,6 @@ KBeagle <- function(data_NA){
 	}
      return("KBeagle_finshed.txt")
 }
-	
 	
 
 
