@@ -108,7 +108,7 @@ KBeagle <- function(data_NA){
      out.hmp <- cbind(rs, alleles, chrom, pos, hmp5.11, hmp)
      colnames(out.hmp)[5:11] <- c("strand", "assembly", "center", "protLSID", "assayLSID", "panelLSID", "QCcode")
      colnames(out.hmp)[12:ncol(out.hmp)] <- paste0("V", 1:(ncol(out.hmp)-11))
-     write.table(out.hmp, "mid1.hmp", col.names = T, sep = "\t", row.names = F, quote = F)#输出填充前hmp格式文件
+     write.table(out.hmp, "mid1.hmp", col.names = T, sep = "\t", row.names = F, quote = F)
      rm(hmp, out.hmp, X)
 	 print("subgroup has converted from num format to hapmap format.")
 	 tassel_script <- file.path(getwd(), "run_pipeline.pl")
